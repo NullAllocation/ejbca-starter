@@ -1,0 +1,64 @@
+# EJBCA Community Edition + MariaDB
+# Usage:
+#   1. Edit the values in .env (especially the passwords)
+#   2. docker compose up -d
+#   3. docker compose logs -f ejbca   (wait for "EJBCA ... started")
+
+name: ejbca
+
+networks:
+  access-bridge:        # public-facing network (EJBCA only)
+    driver: bridge
+  application-bridge:   # internal network (EJBCA <-> database)
+    driver: bridge
+    internal: true
+
+services:
+  ejbca-database:
+    image: mariadb:${MARIADB_VERSION:-11.4}
+    container_name: ejbca-database
+    restart: unless-stopped
+    networks:
+      - application-bridge
+    environment:
+      MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+      MARIADB_DATABASE: ${DB_NAME:-ejbca}
+      MARIADB_USER: ${DB_USER:-ejbca}
+      MARIADB_PASSWORD: ${DB_PASSWORD}
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_bin
+      - --max_allowed_packet=128M
+    volumes:
+      - ./datadbdir:/var/lib/mysql:rw
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  ejbca:
+    image: keyfactor/ejbca-ce:${EJBCA_VERSION:-latest}
+    container_name: ejbca
+    hostname: ${EJBCA_HOSTNAME:-ejbca.local}
+    restart: unless-stopped
+    depends_on:
+      ejbca-database:
+        condition: service_healthy
+    networks:
+      - access-bridge
+      - application-bridge
+    environment:
+      DATABASE_JDBC_URL: jdbc:mariadb://ejbca-database:3306/${DB_NAME:-ejbca}?characterEncoding=UTF-8
+      DATABASE_USER: ${DB_USER:-ejbca}
+      DATABASE_PASSWORD: ${DB_PASSWORD}
+      # true   = create a ManagementCA + superadmin client cert (recommended)
+      # simple = admin UI open over HTTPS without client cert (TESTING ONLY)
+      # later  = configure TLS yourself after startup
+      TLS_SETUP_ENABLED: ${TLS_SETUP_ENABLED:-true}
+      LOG_LEVEL_APP: INFO
+      LOG_LEVEL_SERVER: INFO
+    ports:
+      - "${HTTP_PORT:-80}:8080"
+      - "${HTTPS_PORT:-443}:8443"
