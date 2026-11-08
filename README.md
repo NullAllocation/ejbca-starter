@@ -1,6 +1,6 @@
 # Setting up EJBCA with Docker Compose
 
-This guide will walk you through the process of setting up EJBCA using Podman Compose. EJBCA is an open source software product to allow single sign-on with identity and access management aimed at modern applications and services.
+This guide will walk you through the process of setting up EJBCA using Docker Compose. EJBCA is a free and open-source public key infrastructure (PKI) and certificate authority (CA) software package originally created by PrimeKey Solutions AB and now maintained by Keyfactor.
 
 ## Prerequisites
 
@@ -142,7 +142,7 @@ alias ejbca='docker exec -it ejbca /opt/keyfactor/bin/ejbca.sh'
 
 8. Optional: test the web workflows
 
-To check the UI path that real users will take, open the RA web at https://localhost/ejbca/ra/ and use Make New Request to enroll a certificate through the browser. If you plan to use protocols like ACME, SCEP, EST, or the REST API, enable each one under System Configuration → Protocol Configuration in the admin web, then test it with a real client. For example, certbot works for ACME and curl for REST.
+   To check the UI path that real users will take, open the RA web at https://localhost/ejbca/ra/ and use Make New Request to enroll a certificate through the browser. If you plan to use protocols like ACME, SCEP, EST, or the REST API, enable each one under System Configuration → Protocol Configuration in the admin web, then test it with a real client. For example, certbot works for ACME and curl for REST.
 
 Cleanup
 
