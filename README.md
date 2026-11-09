@@ -142,8 +142,69 @@ alias ejbca='docker exec -it ejbca /opt/keyfactor/bin/ejbca.sh'
 
 8. Optional: test the web workflows
 
-   To check the UI path that real users will take, open the RA web at https://localhost/ejbca/ra/ and use Make New Request to enroll a certificate through the browser. If you plan to use protocols like ACME, SCEP, EST, or the REST API, enable each one under System Configuration → Protocol Configuration in the admin web, then test it with a real client. For example, certbot works for ACME and curl for REST.
+    To check the UI path that real users will take, open the RA web at https://localhost/ejbca/ra/ and use Make New Request to enroll a certificate through the browser. If you plan to use protocols like ACME, SCEP, EST, or the REST API, enable each one under System Configuration → Protocol Configuration in the admin web, then test it with a real client. For example, certbot works for ACME and curl for REST.
 
 Cleanup
 
 When you’re done, revoke and delete the test entities. Then remove TestCA from CA Functions in the admin web, or keep it as a sandbox. A clean pass through steps 1–7 means EJBCA can issue, validate, revoke, and publish status, and keeps its data across restarts.
+
+# Using EJBCA,  how do you set up a profiles to register user created keys?
+
+In EJBCA, "user created keys" means the token type **User Generated**: the requester generates the key pair locally and submits only a CSR (PKCS#10 or CRMF). The CA never sees the private key. You need two profiles: a **Certificate Profile** that controls what keys and extensions are acceptable, and an **End Entity Profile** that allows the User Generated token type. Menu names below follow EJBCA 7–9 and may differ slightly in your version.
+
+## 1. Create the Certificate Profile
+
+In the Admin Web, go to **CA Functions → Certificate Profiles** and clone a template such as `ENDUSER` or `SERVER`. Then edit these settings:
+
+- **Available Key Algorithms and Available Bit Lengths / ECDSA curves.** These matter most for user-generated keys, because EJBCA validates the public key in the CSR against them. For example, allow RSA 2048, 3072, and 4096, and ECDSA P-256 and P-384, and reject anything else.
+- **Signature Algorithm.** Usually "Inherit from issuing CA".
+- **Validity, Key Usage and Extended Key Usage.** Set these to match the certificate's purpose, for example Digital Signature + Key Encipherment and TLS Client Auth.
+- **Override options.** Decide how much the CSR is allowed to dictate:
+  - **Allow subject DN override by CSR** lets the CSR's subject be used as-is.
+  - **Allow extension override** and **Allow Key Usage override** let requested extensions through.
+  
+  Leave these off unless you trust the requesters. Otherwise the DN comes from the end entity, and the CSR only contributes the public key.
+- **Available CAs.** Select the issuing CA.
+
+## 2. Create the End Entity Profile
+
+Go to **RA Functions → End Entity Profiles**, add a profile, and edit it:
+
+- **Subject DN and Subject Alternative Name fields.** Add the attributes you need (CN, O, C, DNSName, and so on) and mark them required or modifiable.
+- **Default Certificate Profile and Available Certificate Profiles.** Select the profile from step 1.
+- **Default CA and Available CAs.** Select your issuing CA.
+- **Default Token: User Generated.** Under **Available Tokens**, select only **User Generated** if you want to force client-side key generation. If you also select P12/JKS/PEM, server-side generation becomes an option too.
+- **Key Recoverable.** Leave this unchecked. Key recovery is impossible when the CA never had the private key.
+- **Password (Enrollment Code).** Choose whether it is required or auto-generated.
+- **Allow merge DN** (optional). Useful for protocol enrollments (SCEP/CMP/EST/REST) when you want to merge profile defaults with the CSR's DN.
+
+## 3. Grant access, if using the RA Web
+
+The role that will request certificates needs access to the new End Entity Profile, the CA, and the create/edit end entity RA rules. Set this under **System Functions → Roles and Access Rules**.
+
+## 4. Enroll with a CSR
+
+First, generate the key and CSR on the client side:
+
+```bash
+openssl req -new -newkey rsa:3072 -nodes -keyout user.key -out user.csr -subj "/CN=jdoe/O=Example"
+```
+
+Then submit it in one of these ways:
+
+- **RA Web, request-based.** Choose **Enroll → Make New Request**, pick your profiles, set Key-pair generation to **Provided by user**, and paste or upload the CSR. That option only appears because User Generated is an available token in the End Entity Profile.
+- **RA Web, pre-registered.** An admin first adds the end entity with token User Generated. The user then uses **Enroll → Use Username** with the enrollment code and uploads the CSR.
+- **CLI.**
+  ```bash
+  bin/ejbca.sh ra addendentity --username jdoe --password foo123 --dn "CN=jdoe,O=Example" \
+    --caname MyCA --type 1 --token USERGENERATED --certprofile MyCertProfile --eeprofile MyEEProfile
+  bin/ejbca.sh createcert --username jdoe --password foo123 -c user.csr -f jdoe.pem
+  ```
+- **REST API.** `POST /ejbca/ejbca-rest-api/v1/certificate/pkcs10enroll` with the CSR, `certificate_profile_name`, `end_entity_profile_name`, `certificate_authority_name`, `username`, and `password`. This requires the REST protocol to be enabled under System Configuration → Protocol Configuration, and client-certificate authentication.
+- **SCEP, CMP, or EST aliases.** Point the alias at the same End Entity Profile and Certificate Profile. These protocols are inherently user-generated-key flows.
+
+## Common errors
+
+If enrollment fails with an error such as "Illegal key algorithm" or "key length not allowed", widen the key algorithms or lengths in the Certificate Profile. If it fails with "token type not allowed", check that User Generated is in the End Entity Profile's Available Tokens.
+
+
